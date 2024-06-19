@@ -1,5 +1,5 @@
 /* 重置默认样式 */
- * {
+* {
     margin: 0;
     padding: 0;
     font-family: "hm" !important;
@@ -51,60 +51,140 @@ body {
     user-select: none;
 }
 
-#one{
-    float: left;
+.one {
+    margin: 0 auto;
     margin-top: 50px;
-    margin-left: 5%;
-    width: 40%;
-    height: 400px;
+    width: 800px;
+    height: auto;
     border-radius: 20px;
     background-color: #FFF;
     box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.6);
-    padding: 10px;
+    padding: 20px;
     overflow: auto;
     user-select: none;
 }
-#one h1{
+
+.one h1 {
     text-align: center;
 }
 
-#two{
-    float: right;
-    margin-top: 50px;
-    margin-right: 5%;
-    width: 40%;
-    height: 400px;
-    border-radius: 20px;
-    background-color: #FFF;
-    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.6);
-    padding: 10px;
-    overflow: auto;
-    text-align: center;
+.one #ly {
+    margin-left: 40px;
 }
-#two th,td{
-    padding: 5px;
-}
-#footer{
+
+#footer {
     clear: both;
     width: 300px;
     text-align: center;
-    position: relative;
     margin: 0 auto;
-    top: 30px;
+    margin-top: 20px;
+    margin-bottom: 20px;
     background-color: #FFF;
     box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.6);
     padding: 10px;
     border-radius: 20px;
 }
+
+.card {
+    box-sizing: border-box;
+    position: relative;
+    display: -ms-flexbox;
+    display: flex;
+    -ms-flex-direction: column;
+    flex-direction: column;
+    min-width: 0;
+    word-wrap: break-word;
+    background-color: #fff;
+    background-clip: border-box;
+    border: 1px solid rgba(0, 0, 0, .125);
+    border-radius: .25rem;
+}
+
+.card p {
+    margin-top: 0;
+    margin-bottom: .5rem;
+}
+
+.card-header {
+    padding: .75rem 1.25rem;
+    margin-bottom: 0;
+    background-color: rgba(0, 0, 0, .03);
+    border-bottom: 1px solid rgba(0, 0, 0, .125);
+}
+
+code {
+    font-size: 87.5%;
+    color: #e83e8c;
+    word-wrap: break-word;
+}
+
+.card-body {
+    -ms-flex: 1 1 auto;
+    flex: 1 1 auto;
+    min-height: 1px;
+    padding: 1.25rem;
+}
+
+/* 表格样式 */
+.table-bordered {
+    border: 1px solid #dee2e6;
+}
+
+.table {
+    width: 100%;
+    margin-bottom: 1rem;
+    color: #212529;
+}
+
+table {
+    border-collapse: collapse;
+}
+
+.table-bordered thead td,
+.table-bordered thead th {
+    border-bottom-width: 2px;
+}
+
+.table thead th {
+    vertical-align: bottom;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.table-bordered td,
+.table-bordered th {
+    border: 1px solid #dee2e6;
+}
+
+.table-sm td,
+.table-sm th {
+    padding: .3rem;
+}
+
+.table td,
+.table th {
+    padding: .75rem;
+    vertical-align: top;
+    border-top: 1px solid #dee2e6;
+}
+
+th {
+    text-align: inherit;
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(0, 0, 0, .05);
+}
+
 @media only screen and (max-width:639px) {
-    #one,#two{
+    .one {
         float: none;
         margin: 0 auto;
         margin-top: 30px;
         width: 80%;
         height: auto;
     }
-    #footer{
-        border-radius: 20px 20px 0 0;
+
+    .one #ly {
+        margin-left: 0;
     }
 }
