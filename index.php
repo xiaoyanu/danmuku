@@ -24,8 +24,7 @@ $time = $_POST['time'];
 
 // 插入弹幕
 if (!empty($player) && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    echo "eee";
-    if (!empty($player) && !empty($text) && !empty($color) && !empty($type) && !empty($time) && !empty($text)) {
+    if (!empty($player) && !empty($text) && !empty($color) && $type !== '' && $time !== "" && $text !== "") {
         header("Content-Type: application/json;charset=utf-8");
         $con = mysqli_connect($sql['host'], $sql['user'], $sql['password'], $sql['database'], $sql['port']);
         if ($con == false) {
