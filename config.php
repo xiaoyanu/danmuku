@@ -29,16 +29,6 @@ class Api
         return mysqli_query($con, "INSERT INTO `danmu` (`player`, `text`, `color`, `time`, `type`, `timestamp`) VALUES ('$player', '$text', '$color', '$time', '$type', '" . time() . "');");
     }
 
-    function hex_rgb($hex)
-    {
-        // 16进制颜色转10进制
-        $red = hexdec(substr($hex, 1, 2)); // 提取红色部分并转换为十进制
-        $green = hexdec(substr($hex, 3, 2)); // 提取绿色部分并转换为十进制
-        $blue = hexdec(substr($hex, 5, 2)); // 提取蓝色部分并转换为十进制
-        $decimalColor = $red * 65536 + $green * 256 + $blue; // 计算十进制颜色值
-        return  $decimalColor;
-    }
-
     function isUrl($string)
     {
         // 使用 filter_var 函数来验证 URL  
@@ -157,5 +147,57 @@ class Api
         } else {
             return "没有找到匹配的域名";
         }
+    }
+
+    function GetBilibiliXml($url)
+    {
+        $curl = curl_init();
+        curl_setopt_array($curl, array(
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'GET',
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER => array(
+                'Accept: */*',
+                'Host: api.bilibili.com',
+                'Connection: keep-alive'
+            ),
+        ));
+        $response = curl_exec($curl);
+        curl_close($curl);
+        return $response;
+    }
+
+    function num_hexColor($num)
+    {
+        // 提取RGB分量  
+        $red = ($num >> 16) & 0xFF;
+        $green = ($num >> 8) & 0xFF;
+        $blue = $num & 0xFF;
+        // 将RGB分量转换为16进制字符串，并确保它们都是两位数  
+        $hexRed = str_pad(dechex($red), 2, '0', STR_PAD_LEFT);
+        $hexGreen = str_pad(dechex($green), 2, '0', STR_PAD_LEFT);
+        $hexBlue = str_pad(dechex($blue), 2, '0', STR_PAD_LEFT);
+        // 拼接成完整的16进制颜色代码  
+        $hexColor = '#' . $hexRed . $hexGreen . $hexBlue;
+        return $hexColor;
+    }
+
+    function hex_RgbInt($hexColor)
+    {
+        $hexColor = str_replace('#', '', $hexColor);
+        while (strlen($hexColor) < 6) {
+            $hexColor .= 'F';
+        }
+        $r = hexdec(substr($hexColor, 0, 2));
+        $g = hexdec(substr($hexColor, 2, 2));
+        $b = hexdec(substr($hexColor, 4, 2));
+        return ($r << 16) + ($g << 8) + $b;
     }
 }
