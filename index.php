@@ -12,7 +12,6 @@ $Api = new Api;
 $sql = $Api->mysql();
 
 $id = $_GET['id'];
-$url = $_GET['url'];
 $type = $_REQUEST['type']; //弹幕位置或返回JSON、XML类型
 $mode = $_GET['mode']; //专门适配某个播放器
 
@@ -32,13 +31,15 @@ if (!empty($player) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['code' => 404, 'msg' => '与数据库连接失败，请检查config.php中的数据库项是否正确'], 448);
             die;
         }
-        if ($Api->is_hex_color($color) == false) {
-            $color = "#FFFFFF";
-        }
-        if ($Api->add($con, $player, $time, $type, $color, $text)) {
-            echo json_encode(['code' => 200, 'msg' => '弹幕发送成功'], 448);
+        if ($Api->isUrl($player)) {
+            echo json_encode(['code' => 404, 'msg' => '弹幕发送失败，请提交MD5值，不支持提交链接'], 448);
         } else {
-            echo json_encode(['code' => 404, 'msg' => '弹幕发送失败'], 448);
+            if ($Api->add($con, $player, $time, $type, $color, $text)) {
+                echo json_encode(['code' => 200, 'msg' => '弹幕发送成功'], 448);
+            } else {
+                echo json_encode(['code' => 404, 'msg' => '弹幕发送失败'], 448);
+            }
+            mysqli_close($con);
         }
     } else {
         echo json_encode(['code' => 404, 'msg' => '参数不能为空，请确保填写了所有参数，并以POST方式提交'], 448);
@@ -48,27 +49,22 @@ if (!empty($player) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // 获取弹幕
 if (!empty($type) && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    if (!empty($url) || !empty($id)) {
+    if (!empty($id)) {
         switch ($type) {
             case 'xml':
                 header("Content-Type: text/xml;charset=utf-8");
-                if ($id !== null) {
-                    $data = getDanmu($id, $mode);
-                } else {
-                    $data = getDanmu($url, $mode);
-                }
+                $data = getDanmu($id, $mode);
                 switch ($mode) {
                     case 'artplayer':
                         for ($i = 0; $i < count($data); $i++) {
-                            $data[$i]['mode'] = str_replace("1", "5", $data[$i]['mode']);
-                            $data[$i]['mode'] = str_replace("2", "4", $data[$i]['mode']);
                             $data[$i]['mode'] = str_replace("0", "1", $data[$i]['mode']);
-                            $d = $d . '<d p="' . $data[$i]['time'] . ',' . $data[$i]['mode'] . ',25,' . $Api->hex_rgb($data[$i]['color']) . ',' . $data[$i]['timestamp'] . ',,,' . ($i + 1) . '">' . $data[$i]['text'] . '</d>';
+                            $data[$i]['mode'] = str_replace("2", "4", $data[$i]['mode']);
+                            $d = $d . '<d p="' . $data[$i]['time'] . ',' . $data[$i]['mode'] . ',25,' . $Api->hex_RgbInt($data[$i]['color']) . ',' . $data[$i]['timestamp'] . ',,,' . ($i + 1) . '">' . $data[$i]['text'] . '</d>';
                         }
                         break;
                     default:
                         for ($i = 0; $i < count($data); $i++) {
-                            $d = $d . '<d p="' . $data[$i][0] . ',' . $data[$i][1] . ',25,' . $Api->hex_rgb($data[$i][2]) . ',' . $data[$i][4] . ',,,' . ($i + 1) . '">' . $data[$i][3] . '</d>';
+                            $d = $d . '<d p="' . $data[$i][0] . ',' . $data[$i][1] . ',25,' . $Api->hex_RgbInt($data[$i][2]) . ',' . $data[$i][4] . ',,,' . ($i + 1) . '">' . $data[$i][3] . '</d>';
                         }
                         break;
                 }
@@ -78,13 +74,14 @@ if (!empty($type) && $_SERVER['REQUEST_METHOD'] === 'GET') {
 
             case 'json':
                 header("Content-Type: application/json;charset=utf-8");
-                if ($id !== null) {
-                    $data = getDanmu($id, $mode);
-                } else {
-                    $data = getDanmu($url, $mode);
-                }
+                $data = getDanmu($id, $mode);
                 switch ($mode) {
                     case "artplayer":
+                        for ($i = 0; $i < count($data); $i++) {
+                            $data[$i]['mode'] = (int)str_replace("1", "0", $data[$i]['mode']);
+                            $data[$i]['mode'] = (int)str_replace("5", "1", $data[$i]['mode']);
+                            $data[$i]['mode'] = (int)str_replace("4", "2", $data[$i]['mode']);
+                        }
                         echo json_encode($data);
                         break;
                     default:
@@ -106,7 +103,7 @@ if (!empty($type) && $_SERVER['REQUEST_METHOD'] === 'GET') {
         }
     } else {
         header("Content-Type: application/json;charset=utf-8");
-        echo json_encode(['code' => 404, 'msg' => '参数id或url，至少填写一项，不能都为空！'], 448);
+        echo json_encode(['code' => 404, 'msg' => '参数id不能都为空'], 448);
     }
     die;
 }
@@ -115,7 +112,14 @@ function getDanmu($id_url, $mode)
 // 获取弹幕
 {
     global $sql, $Api;
+    // 弹幕数组顺序：time、type、color、text、timestamp
     if ($Api->isUrl($id_url) == false) {
+        $is_url = false;
+    } else {
+        $is_url = true;
+    }
+    // 判断是不是链接，如果不是则从数据库中获取弹幕
+    if ($is_url == false) {
         $con = mysqli_connect($sql['host'], $sql['user'], $sql['password'], $sql['database'], $sql['port']);
         if ($con == false) {
             header("Content-Type: application/json;charset=utf-8");
@@ -123,76 +127,149 @@ function getDanmu($id_url, $mode)
             die;
         }
         $sql = mysqli_query($con, "SELECT * FROM `danmu` WHERE `player` = '$id_url' ORDER BY `time` ASC");
-        $data = array();
-        switch ($mode) {
-            case "artplayer":
-                if (mysqli_num_rows($sql) < 1) {
-                    $data[] = ["time" => 1, "mode" => 1, "color" => '#4994c4', "text" => '请遵守弹幕礼仪，祝您观影愉快~', "timestamp" => (string)time()];
-                } else {
-                    $data[] = ["time" => 1, "mode" => 1, "color" => '#4994c4', "text" => '有' . mysqli_num_rows($sql) . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', "timestamp" => (string)time()];
-                }
-                while ($row = mysqli_fetch_array($sql, MYSQLI_ASSOC)) {
-                    $data[] = [
-                        "time" => (float)$row['time'],
-                        "mode" => (int)$row['type'],
-                        "color" => $row['color'],
-                        "text" => $row['text'],
-                        "timestamp" => $row['timestamp']
-                    ];
-                }
-                break;
-            default:
-                if (mysqli_num_rows($sql) < 1) {
-                    $data[] = ['1', '5', '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-                } else {
-                    $data[] = ['1', '5', '#4994c4', '有' . mysqli_num_rows($sql) . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-                }
-                while ($row = mysqli_fetch_array($sql, MYSQLI_ASSOC)) {
-                    $data[] = [
-                        $row['time'],
-                        $row['type'],
-                        $row['color'],
-                        $row['text'],
-                        $row['timestamp'],
-                    ];
-                }
-                break;
+        $count = mysqli_num_rows($sql);
+        $db = [];
+        if ($count < 1) {
+            $db[] = ["1", 5, '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+        } else {
+            $db[] = ['1', 5, '#4994c4', '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+        }
+        while ($row = mysqli_fetch_array($sql, MYSQLI_ASSOC)) {
+            $db[] = [
+                $row['time'],
+                $row['type'],
+                $row['color'],
+                $row['text'],
+                $row['timestamp'],
+            ];
         }
         mysqli_close($con);
     } else {
         $pt = whoUrl($id_url);
         switch ($pt) {
             default:
-                $data[] = ['1', '5', '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                $web[] = ['1', 5, '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                $count = 1;
                 break;
-                // case 'b站':
-                //     // https://www.bilibili.com/video/BV1mf421B7rZ/
-
-                //     $bv = $Api->GetTextRight($id_url, "video/");
-                //     if (strpos($bv, "/") !== false) {
-                //         $bv = $Api->GetTextLeft($bv, "/");
-                //     }
-                //     $cid = json_decode($Api->CurlGet("https://api.bilibili.com/x/player/pagelist?bvid=$bv", false), true);
-                //     $cid = $cid['data'][0]['cid'];
-                //     $dm = $Api->CurlGet("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid", false);
-                //     echo $dm;
-                //     die;
-                //     break;
+            case 'b站':
+                // https://www.bilibili.com/video/BV1mf421B7rZ/
+                $bv = $Api->GetTextRight($id_url, "video/");
+                if (strpos($bv, "/") !== false) {
+                    $bv = $Api->GetTextLeft($bv, "/");
+                }
+                $cid = json_decode($Api->CurlGet("https://api.bilibili.com/x/player/pagelist?bvid=$bv", false), true);
+                $cid = $cid['data'][0]['cid'];
+                if (!empty($cid)) {
+                    $dm = $Api->GetBilibiliXml("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid", false);
+                    $dm = simplexml_load_string($dm);
+                    // 获取弹幕内容
+                    $json = json_encode($dm);
+                    $nr = json_decode($json, true);
+                    $nr = $nr['d'];
+                    // 获取弹幕参数
+                    $cs = [];
+                    foreach ($dm->d as $d) {
+                        $pValue = (string)$d['p'];
+                        $cs[] = explode(",", $pValue);
+                    }
+                    // 重新组装
+                    $count = count($nr);
+                    $web = [];
+                    if ($count < 1) {
+                        $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                    } else {
+                        $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                    }
+                    for ($i = 0; $i < count($nr); $i++) {
+                        $web[] = [
+                            $cs[$i][0],
+                            $cs[$i][1],
+                            $Api->num_hexColor($cs[$i][3]),
+                            $nr[$i],
+                            $cs[$i][4]
+                        ];
+                    }
+                } else {
+                    $count = 1;
+                    $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                }
         }
+    }
+
+    // 最后根据播放器返回结果【#】
+    $data = [];
+    switch ($mode) {
+        case "artplayer":
+            if ($is_url == false) {
+                if ($count > 0) {
+                    for ($z = 0; $z < count($db); $z++) {
+                        $data[] = [
+                            "time" => (float)$db[$z][0],
+                            "mode" => (int)$db[$z][1],
+                            "color" => $db[$z][2],
+                            "text" => $db[$z][3],
+                            "timestamp" => $db[$z][4]
+                        ];
+                    }
+                }
+            } else {
+                if ($count > 0) {
+                    for ($z = 0; $z < count($web); $z++) {
+                        $data[] = [
+                            "time" => (float)$web[$z][0],
+                            "mode" => (int)$web[$z][1],
+                            "color" => $web[$z][2],
+                            "text" => $web[$z][3],
+                            "timestamp" => $web[$z][4]
+                        ];
+                    }
+                }
+            }
+            break;
+        default:
+            if ($is_url == false) {
+                if ($count > 0) {
+                    for ($z = 0; $z < count($db); $z++) {
+                        $data[] = [
+                            (float)$db[$z][0],
+                            (int)$db[$z][1],
+                            $db[$z][2],
+                            $db[$z][3],
+                            $db[$z][4]
+                        ];
+                    }
+                }
+            } else {
+                if ($count > 0) {
+                    for ($z = 0; $z < count($web); $z++) {
+                        $data[] = [
+                            (float)$web[$z][0],
+                            (int)$web[$z][1],
+                            $web[$z][2],
+                            $web[$z][3],
+                            $web[$z][4]
+                        ];
+                    }
+                }
+            }
+            break;
     }
     return $data;
 }
+
 function whoUrl($url)
 // 检测哪个平台的链接
 {
+    $q = 1008611;
     if (strpos($url, "v.qq.com") !== false) {
-        return 'qq';
+        $q = 'qq';
     }
     if (strpos($url, "bilibili.com") !== false) {
-        return 'b站';
+        $q = 'b站';
     }
-    return 0;
+    return $q;
 }
+
 ?>
 
 <!--
@@ -303,13 +380,7 @@ function whoUrl($url)
                                 <td>id</td>
                                 <td>Text</td>
                                 <td>视频标识</td>
-                                <td>视频链接MD5<br><b>id和url填写其中一个即可</b></td>
-                            </tr>
-                            <tr>
-                                <td>url</td>
-                                <td>Text</td>
-                                <td>平台链接</td>
-                                <td>仅支持平台链接<br>已支持平台：暂无<br><b>id和url填写其中一个即可</b></td>
+                                <td>视频链接MD5或平台链接<br><br>已支持平台：<br>b站</td>
                             </tr>
                             <tr>
                                 <td>mode</td>
