@@ -35,6 +35,8 @@ if (!empty($player) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['code' => 404, 'msg' => '弹幕发送失败，请提交MD5值，不支持提交链接'], 448);
         } else {
             // 限制提交最大长度100字
+            $text = str_replace('<', '&lt;', $text);
+            $text = str_replace('>', '&gt;', $text);
             if ($Api->add($con, $player, $time, $type, $color, mb_substr($text, 0, 100, 'utf-8'))) {
                 echo json_encode(['code' => 200, 'msg' => '弹幕发送成功'], 448);
             } else {
@@ -191,6 +193,8 @@ function getDanmu($id_url, $mode)
                         $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
                     }
                     for ($i = 0; $i < $count; $i++) {
+                        $nr[$i] = str_replace('<', '&lt;', $nr[$i]);
+                        $nr[$i] = str_replace('>', '&gt;', $nr[$i]);
                         $web[] = [
                             $cs[$i][0],
                             $cs[$i][1],
@@ -237,6 +241,8 @@ function getDanmu($id_url, $mode)
                         $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
                     }
                     for ($i = 0; $i < $count; $i++) {
+                        $nr[$i] = str_replace('<', '&lt;', $nr[$i]);
+                        $nr[$i] = str_replace('>', '&gt;', $nr[$i]);
                         $web[] = [
                             $cs[$i][0],
                             $cs[$i][1],
