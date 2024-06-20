@@ -202,9 +202,12 @@ function getDanmu($id_url, $mode)
                 }
                 break;
             case 'qq':
-                $dm = $Api->GetQQxml("https://fc.lyz05.cn/?url=$id_url");
+                $dm = $Api->GetQQXml("https://fc.lyz05.cn/?url=$id_url");
                 if (strpos($dm, "xml") !== false) {
-                    $dm = simplexml_load_string($dm);
+                    $dm = $Api->GetQQ2Xml($id_url);
+                    if (strpos($dm, "xml") !== false) {
+                        $dm = simplexml_load_string($dm);
+                    }
                 }
                 // 获取弹幕内容
                 $json = json_encode($dm);
