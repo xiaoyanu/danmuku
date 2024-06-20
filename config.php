@@ -253,4 +253,11 @@ class Api
         $b = hexdec(substr($hexColor, 4, 2));
         return ($r << 16) + ($g << 8) + $b;
     }
+
+    function GetTextNumber($text)
+    {
+        // 取出数字
+        preg_match_all('/\d+/', $text, $matches);
+        return $matches[0];
+    }
 }
