@@ -34,7 +34,8 @@ if (!empty($player) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($Api->isUrl($player)) {
             echo json_encode(['code' => 404, 'msg' => '弹幕发送失败，请提交MD5值，不支持提交链接'], 448);
         } else {
-            if ($Api->add($con, $player, $time, $type, $color, $text)) {
+            // 限制提交最大长度100字
+            if ($Api->add($con, $player, $time, $type, $color, mb_substr($text, 0, 100, 'utf-8'))) {
                 echo json_encode(['code' => 200, 'msg' => '弹幕发送成功'], 448);
             } else {
                 echo json_encode(['code' => 404, 'msg' => '弹幕发送失败'], 448);
@@ -89,7 +90,7 @@ if (!empty($type) && $_SERVER['REQUEST_METHOD'] === 'GET') {
                             'code' => 200,
                             'id' => $id,
                             'count' => count($data),
-                            'danmu' => $data
+                            'danmuku' => $data
                         ]);
                         break;
                 }
@@ -131,6 +132,7 @@ function getDanmu($id_url, $mode)
         $db = [];
         if ($count < 1) {
             $db[] = ["1", 5, '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+            $count = 1;
         } else {
             $db[] = ['1', 5, '#4994c4', '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
         }
@@ -159,7 +161,10 @@ function getDanmu($id_url, $mode)
                 }
                 $cid = json_decode($Api->CurlGet("https://api.bilibili.com/x/player/pagelist?bvid=$bv", false), true);
                 $cid = $cid['data'][0]['cid'];
-                if (!empty($cid)) {
+                if (empty($cid)) {
+                    $count = 1;
+                    $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                } else {
                     $dm = $Api->GetBilibiliXml("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid", false);
                     $dm = simplexml_load_string($dm);
                     // 获取弹幕内容
@@ -170,29 +175,73 @@ function getDanmu($id_url, $mode)
                     $cs = [];
                     foreach ($dm->d as $d) {
                         $pValue = (string)$d['p'];
-                        $cs[] = explode(",", $pValue);
+                        $psz = explode(",", $pValue);
+                        $cs[] = [$psz[0], $psz[1], $psz[3], $psz[4]];
                     }
                     // 重新组装
                     $count = count($nr);
+                    if ($count > 3000) {
+                        $count = 3000;
+                    }
                     $web = [];
                     if ($count < 1) {
                         $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                        $count = 1;
                     } else {
                         $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
                     }
-                    for ($i = 0; $i < count($nr); $i++) {
+                    for ($i = 0; $i < $count; $i++) {
                         $web[] = [
                             $cs[$i][0],
                             $cs[$i][1],
-                            $Api->num_hexColor($cs[$i][3]),
+                            $Api->num_hexColor($cs[$i][2]),
                             $nr[$i],
-                            $cs[$i][4]
+                            $cs[$i][3]
                         ];
                     }
-                } else {
+                }
+                break;
+            case 'qq':
+                $dm = $Api->GetQQxml("https://fc.lyz05.cn/?url=$id_url");
+                $dm = simplexml_load_string($dm);
+                // 获取弹幕内容
+                $json = json_encode($dm);
+                $nr = json_decode($json, true);
+                if (empty($nr['d'][0])) {
                     $count = 1;
                     $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                } else {
+                    $nr = $nr['d'];
+                    // 获取弹幕参数
+                    $cs = [];
+                    foreach ($dm->d as $d) {
+                        $pValue = (string)$d['p'];
+                        $psz = explode(",", $pValue);
+                        $cs[] = [$psz[0], $psz[1], $psz[3], $psz[4]];
+                    }
+                    // 重新组装
+                    $count = count($nr);
+                    if ($count > 3000) {
+                        $count = 3000;
+                    }
+                    $web = [];
+                    if ($count < 1) {
+                        $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                        $count = 1;
+                    } else {
+                        $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                    }
+                    for ($i = 0; $i < $count; $i++) {
+                        $web[] = [
+                            $cs[$i][0],
+                            $cs[$i][1],
+                            $Api->num_hexColor($cs[$i][2]),
+                            $nr[$i],
+                            $cs[$i][3]
+                        ];
+                    }
                 }
+                break;
         }
     }
 
@@ -380,7 +429,7 @@ function whoUrl($url)
                                 <td>id</td>
                                 <td>Text</td>
                                 <td>视频标识</td>
-                                <td>视频链接MD5或平台链接<br><br>已支持平台：<br>b站</td>
+                                <td>视频链接MD5或平台链接<br><br>已支持平台：<br>b站、腾讯视频</td>
                             </tr>
                             <tr>
                                 <td>mode</td>
@@ -447,7 +496,7 @@ function whoUrl($url)
         </div>
     </div>
     <div id="footer">
-        如有问题请联系QQ：1872786834
+        交流/反馈QQ群：<a href="https://qm.qq.com/q/rDi8Kj7H7G" target="_blank">431887641</a>
     </div>
     <script>
         console.log("\n\n\n %c 弹幕管理系统 By：小言u %c https://github.com/xiaoyanu/danmuku", "color:#fff;background:linear-gradient(90deg,#448bff,#44e9ff);padding:5px 0;", "color:#000;background:linear-gradient(90deg,#44e9ff,#ffffff);padding:5px 10px 5px 0px;");
