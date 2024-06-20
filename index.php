@@ -208,6 +208,8 @@ function getDanmu($id_url, $mode)
             case 'qq':
                 $dm = $Api->GetQQXml("https://fc.lyz05.cn/?url=$id_url");
                 if (strpos($dm, "xml") !== false) {
+                    $dm = simplexml_load_string($dm);
+                }else{
                     $dm = $Api->GetQQ2Xml($id_url);
                     if (strpos($dm, "xml") !== false) {
                         $dm = simplexml_load_string($dm);
