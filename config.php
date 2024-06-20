@@ -174,7 +174,7 @@ class Api
         return $response;
     }
 
-    function GetQQxml($url)
+    function GetQQXml($url)
     {
         $curl = curl_init();
         curl_setopt_array($curl, array(
@@ -197,6 +197,34 @@ class Api
         $response = curl_exec($curl);
         curl_close($curl);
         return $response;
+    }
+
+    function GetQQ2Xml($url)
+    {
+        $curl = curl_init();
+        curl_setopt_array($curl, array(
+            CURLOPT_URL => 'https://feiyudo.com/api/video/danmakuExtract',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => '{"url":"' . $url . '"}',
+            CURLOPT_HTTPHEADER => array(
+                'Content-Type: application/json',
+                'Accept: */*',
+                'Host: feiyudo.com',
+                'Connection: keep-alive'
+            ),
+        ));
+        $response = curl_exec($curl);
+        $response = json_decode($response, true);
+        curl_close($curl);
+        return $response['data']['content'];
     }
 
     function num_hexColor($num)
