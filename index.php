@@ -7,45 +7,65 @@
 // 
 // Nginx：在 Nginx 中，你可以在你的配置文件中的 server 块内添加以下内容：
 // add_header 'Access-Control-Allow-Origin' '*';
+
 include 'config.php';
 $Api = new Api;
 $sql = $Api->mysql();
 
-$id = $_GET['id'];
-$type = $_REQUEST['type']; //弹幕位置或返回JSON、XML类型
-$mode = $_GET['mode']; //专门适配某个播放器
+// 获取Redis缓存实例
+$redisCache = RedisCache::getInstance();
 
-// 提交弹幕
-$player = $_POST['player'];
-$text = $_POST['text'];
-$color = $_POST['color'];
-$time = $_POST['time'];
+// 获取各种参数
+$id = $_GET['id']; // URL/MD5
+// - 提交弹幕
+$player = $_POST['player']; // MD5
+$text = $_POST['text']; // 弹幕内容
+$color = $_POST['color']; // 弹幕颜色
+$time = $_POST['time']; // 弹幕出现时间
+$type = $_REQUEST['type']; // 弹幕位置或返回JSON、XML类型
+$mode = $_GET['mode']; // 专门适配某个播放器
+
+// 如果是URL链接，则简单净化一下
+if (!empty($id)) {
+    // 正则匹配是否含有链接
+    if (strpos($id, "://") !== false) {
+        preg_match_all('/https?:\/\/\S+/', $id, $matches);
+        if (count($matches) > 0) {
+            $id = $matches[0][0];
+            if (strpos($id, "?") !== false) {
+                // 如果是链接则截取?之前的内容
+                $id = $Api->GetTextLeft($id, "?");
+            }
+        }
+    }
+}
+
+// 配置项
+$max_conunt = 500; // 截取最大弹幕数量，从第三方获取时
 
 // 插入弹幕
 if (!empty($player) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($player) && !empty($text) && !empty($color) && $type !== '' && $time !== "" && $text !== "") {
-        header("Content-Type: application/json;charset=utf-8");
-        $con = mysqli_connect($sql['host'], $sql['user'], $sql['password'], $sql['database'], $sql['port']);
-        if ($con == false) {
-            header("Content-Type: application/json;charset=utf-8");
-            echo json_encode(['code' => 404, 'msg' => '与数据库连接失败，请检查config.php中的数据库项是否正确'], 448);
-            die;
-        }
-        if ($Api->isUrl($player)) {
-            echo json_encode(['code' => 404, 'msg' => '弹幕发送失败，请提交MD5值，不支持提交链接'], 448);
+        // 限制提交弹幕类型
+        if ($Api->isUrl($player) || !$Api->is_md5($player)) {
+            $Api->echo_json(['code' => 404, 'msg' => '弹幕发送失败，请提交MD5值，不支持提交链接']);
         } else {
-            // 限制提交最大长度100字
-            $text = str_replace('<', '&lt;', $text);
-            $text = str_replace('>', '&gt;', $text);
-            if ($Api->add($con, $player, $time, $type, $color, mb_substr($text, 0, 100, 'utf-8'))) {
-                echo json_encode(['code' => 200, 'msg' => '弹幕发送成功'], 448);
-            } else {
-                echo json_encode(['code' => 404, 'msg' => '弹幕发送失败'], 448);
+            $con = $Api->getDbConnection();
+            if ($con == false) {
+                $Api->echo_json(['code' => 404, 'msg' => '与数据库连接失败，请检查数据库项是否正确']);
+                die;
             }
-            mysqli_close($con);
+            // 限制提交最大长度100字
+            if ($Api->add($con, $player, $time, $type, $color, $Api->XmlToHtml(mb_substr($text, 0, 100, 'utf-8')))) {
+                // 清除相关缓存，确保新数据能被获取到
+                $redisCache->delete($player);
+                $Api->echo_json(['code' => 200, 'msg' => '弹幕发送成功']);
+            } else {
+                $Api->echo_json(['code' => 404, 'msg' => '弹幕发送失败']);
+            }
         }
     } else {
-        echo json_encode(['code' => 404, 'msg' => '参数不能为空，请确保填写了所有参数，并以POST方式提交'], 448);
+        $Api->echo_json(['code' => 404, 'msg' => '参数不能为空，请确保填写了所有参数，并以POST方式提交']);
     }
     die;
 }
@@ -53,265 +73,216 @@ if (!empty($player) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // 获取弹幕
 if (!empty($type) && $_SERVER['REQUEST_METHOD'] === 'GET') {
     if (!empty($id)) {
+        // 限制获取弹幕类型
+        if ($Api->whoUrl($id) == 10086) {
+            if ($Api->is_md5($id) == false) {
+                $Api->echo_json(['code' => 404, 'msg' => '弹幕获取失败，不是标准的MD5或提交了尚未支持的平台链接']);
+                die;
+            }
+        }
         switch ($type) {
             case 'xml':
                 header("Content-Type: text/xml;charset=utf-8");
                 $data = getDanmu($id, $mode);
-                switch ($mode) {
-                    case 'artplayer':
-                        for ($i = 0; $i < count($data); $i++) {
-                            $data[$i]['mode'] = str_replace("0", "1", $data[$i]['mode']);
-                            $data[$i]['mode'] = str_replace("2", "4", $data[$i]['mode']);
-                            $d = $d . '<d p="' . $data[$i]['time'] . ',' . $data[$i]['mode'] . ',25,' . $Api->hex_RgbInt($data[$i]['color']) . ',' . $data[$i]['timestamp'] . ',,,' . ($i + 1) . '">' . $data[$i]['text'] . '</d>';
-                        }
-                        break;
-                    default:
-                        for ($i = 0; $i < count($data); $i++) {
-                            $d = $d . '<d p="' . $data[$i][0] . ',' . $data[$i][1] . ',25,' . $Api->hex_RgbInt($data[$i][2]) . ',' . $data[$i][4] . ',,,' . ($i + 1) . '">' . $data[$i][3] . '</d>';
-                        }
-                        break;
+                $d = '';
+                // B站XML格式返回
+                foreach ($data as $index => $item) {
+                    $item['mode'] = str_replace("0", "1", $item['mode']);
+                    $item['mode'] = str_replace("2", "4", $item['mode']);
+                    $d .= '<d p="' . $item[0] . ',' . $item[1] . ',25,' . $Api->hex_RgbInt($item[2]) . ',' . $item[4] . ',,,' . ($index + 1) . '">' . $item[3] . '</d>';
+                }
+                // 将Url转换为Md5
+                if ($Api->isUrl($id)) {
+                    $id = md5($id);
                 }
                 echo '<?xml version="1.0" encoding="utf-8"?><i><code>' . count($data) . '</code><id>' . $id . '</id>' . $d . '</i>';
                 break;
 
 
             case 'json':
-                header("Content-Type: application/json;charset=utf-8");
                 $data = getDanmu($id, $mode);
-                switch ($mode) {
-                    case "artplayer":
-                        for ($i = 0; $i < count($data); $i++) {
-                            $data[$i]['mode'] = (int)str_replace("1", "0", $data[$i]['mode']);
-                            $data[$i]['mode'] = (int)str_replace("5", "1", $data[$i]['mode']);
-                            $data[$i]['mode'] = (int)str_replace("4", "2", $data[$i]['mode']);
-                        }
-                        echo json_encode($data);
-                        break;
-                    default:
-                        echo json_encode([
-                            'code' => 200,
-                            'id' => $id,
-                            'count' => count($data),
-                            'danmuku' => $data
-                        ]);
-                        break;
+                // 将Url转换为Md5
+                if ($Api->isUrl($id)) {
+                    $id = md5($id);
                 }
+                $Api->echo_json([
+                    'code' => 200,
+                    'id' => $id,
+                    'count' => count($data),
+                    'danmuku' => $data
+                ]);
                 break;
 
 
             default:
-                header("Content-Type: application/json;charset=utf-8");
-                echo json_encode(['code' => 404, 'msg' => 'type类型不正确，可用：xml或json'], 448);
+                $Api->echo_json(['code' => 404, 'msg' => 'type类型不正确，可用：xml或json']);
                 break;
         }
     } else {
-        header("Content-Type: application/json;charset=utf-8");
-        echo json_encode(['code' => 404, 'msg' => '参数id不能都为空'], 448);
+        $Api->echo_json(['code' => 404, 'msg' => '参数id不能为空']);
     }
     die;
 }
 
+/**
+ * 获取弹幕
+ * @param string $id_url 弹幕id或url
+ * @param string $mode 播放器格式
+ * @return array 弹幕数组
+ */
 function getDanmu($id_url, $mode)
-// 获取弹幕
 {
-    global $sql, $Api;
-    // 弹幕数组顺序：time、type、color、text、timestamp
-    if ($Api->isUrl($id_url) == false) {
-        $is_url = false;
-    } else {
-        $is_url = true;
+    global $sql, $Api, $max_conunt, $redisCache, $type;
+
+    // 检测是不是URL链接
+    if ($Api->isUrl($id_url)) {
+        $userUrl = $id_url; // 存储用户提交的URL
+        $id_url = md5($userUrl); // 将URL转为MD5
     }
-    // 判断是不是链接，如果不是则从数据库中获取弹幕
-    if ($is_url == false) {
-        $con = mysqli_connect($sql['host'], $sql['user'], $sql['password'], $sql['database'], $sql['port']);
+    $cacheKey = $id_url; // 指定缓存键值
+
+    // 尝试从Redis缓存获取数据
+    $cachedData = $redisCache->get($cacheKey);
+    if ($cachedData !== false) {
+        // 如果有缓存，则直接获取缓存内容
+        $db = $cachedData;
+        $cachedData = [];
+        $count = count($db);
+    } else {
+        // 如果没有，则走正常判断
+        // 获取数据库弹幕数量
+        $con = $Api->getDbConnection();
         if ($con == false) {
-            header("Content-Type: application/json;charset=utf-8");
-            echo json_encode(['code' => 404, 'msg' => '与数据库连接失败，请检查config.php中的数据库项是否正确'], 448);
+            $Api->echo_json(['code' => 404, 'msg' => '与数据库连接失败，请检查数据库项是否正确']);
             die;
         }
-        $sql = mysqli_query($con, "SELECT * FROM `danmu` WHERE `player` = '$id_url' ORDER BY `time` ASC");
-        $count = mysqli_num_rows($sql);
+
+        // 使用预处理语句防止SQL注入
+        $stmt = mysqli_prepare($con, "SELECT * FROM `danmu` WHERE `player` = ? ORDER BY `time` ASC");
+        mysqli_stmt_bind_param($stmt, "s", $id_url);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+        // 查询数量结果
+        $count = mysqli_num_rows($result);
         $db = [];
-        if ($count < 1) {
-            $db[] = ["1", 5, '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-            $count = 1;
-        } else {
+
+        // 判断数据库中是否有弹幕，有的话则从数据库获取，没有则从第三方获取弹幕
+        if ($count > 0) {
             $db[] = ['1', 5, '#4994c4', '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-        }
-        while ($row = mysqli_fetch_array($sql, MYSQLI_ASSOC)) {
-            $db[] = [
-                $row['time'],
-                $row['type'],
-                $row['color'],
-                $row['text'],
-                $row['timestamp'],
-            ];
-        }
-        mysqli_close($con);
-    } else {
-        $pt = whoUrl($id_url);
-        switch ($pt) {
-            default:
-                $web[] = ['1', 5, '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-                $count = 1;
-                break;
-            case 'b站':
-                // https://www.bilibili.com/video/BV1mf421B7rZ/
-                $bv = $Api->GetTextRight($id_url, "video/");
-                if (strpos($bv, "/") !== false) {
-                    $bv = $Api->GetTextLeft($bv, "/");
-                }
-                $cid = json_decode($Api->CurlGet("https://api.bilibili.com/x/player/pagelist?bvid=$bv", false), true);
-                $cid = $cid['data'][0]['cid'];
-                if (empty($cid)) {
+
+            // 从数据库中获取弹幕
+            while ($row = mysqli_fetch_array($result, MYSQLI_ASSOC)) {
+                $db[] = [
+                    $row['time'],
+                    $row['type'],
+                    $row['color'],
+                    $row['text'],
+                    $row['timestamp'],
+                ];
+            }
+            mysqli_stmt_close($stmt);
+        } else {
+            // 从第三方获取弹幕
+            $pt = $Api->whoUrl($userUrl);
+
+            switch ($pt) {
+                // 什么平台也不是 或者 真的是0弹幕，返回默认弹幕
+                case 10086:
+                    $db[] = ["1", 5, '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
                     $count = 1;
-                    $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-                } else {
-                    $dm = $Api->GetBilibiliXml("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid", false);
-                    $dm = simplexml_load_string($dm);
-                    // 获取弹幕内容
-                    $json = json_encode($dm);
-                    $nr = json_decode($json, true);
-                    $nr = $nr['d'];
-                    // 获取弹幕参数
-                    $cs = [];
-                    foreach ($dm->d as $d) {
-                        $pValue = (string)$d['p'];
-                        $psz = explode(",", $pValue);
-                        $cs[] = [$psz[0], $psz[1], $psz[3], $psz[4]];
+                    break;
+                case 'b站':
+                    $db = getBlibili($userUrl, $Api, $max_conunt);
+                    $count = count($db);
+                    $upDb = $db;
+                    array_shift($upDb); // 删除第一个元素，删除默认弹幕
+                    // 将获取的弹幕存入弹幕库
+                    if (count($upDb) > 0) {
+                        $Api->UploadWebDanmu($sql, $id_url, $upDb);
                     }
-                    // 重新组装
-                    $count = count($nr);
-                    if ($count > 3000) {
-                        $count = 3000;
-                    }
-                    $web = [];
-                    if ($count < 1) {
-                        $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                    break;
+                default:
+                    $jsonData = json_decode(file_get_contents('https://dm.itcxo.cn/?ac=dm&url=' . $userUrl), true);
+                    if ($jsonData['code'] !== 23 && count($jsonData['danmuku']) < 2) {
+                        $db[] = ["1", 5, '#4994c4', '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
                         $count = 1;
                     } else {
-                        $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+                        foreach ($jsonData['danmuku'] as $item) {
+                            $db[] = [
+                                $item[0], //出现时间
+                                $item[1], //位置
+                                $item[2], //颜色
+                                $item[4], //内容
+                                (string)time() //timestamp
+                            ];
+                        }
+                        array_shift($db); // 删除第一个元素，删除默认弹幕
+                        $count = count($db);
+                        if ($count > $max_conunt) {
+                            $db = $Api->Array_GetNum($db, $max_conunt);
+                            $count = count($db);
+                        }
+                        if (count($db) > 0) {
+                            $Api->UploadWebDanmu($sql, $id_url, $db);
+                        }
+
+                        // 在最前面添加一条弹幕
+                        array_unshift($db, ['1', 5, '#4994c4', '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()]);
                     }
-                    for ($i = 0; $i < $count; $i++) {
-                        $nr[$i] = str_replace('<', '&lt;', $nr[$i]);
-                        $nr[$i] = str_replace('>', '&gt;', $nr[$i]);
-                        $web[] = [
-                            $cs[$i][0],
-                            $cs[$i][1],
-                            $Api->num_hexColor($cs[$i][2]),
-                            $nr[$i],
-                            $cs[$i][3]
-                        ];
-                    }
-                }
-                break;
-            case 'qq':
-                $dm = $Api->GetQQXml("https://fc.lyz05.cn/?url=$id_url");
-                if (strpos($dm, "xml") !== false) {
-                    $dm = simplexml_load_string($dm);
-                }else{
-                    $dm = $Api->GetQQ2Xml($id_url);
-                    if (strpos($dm, "xml") !== false) {
-                        $dm = simplexml_load_string($dm);
-                    }
-                }
-                // 获取弹幕内容
-                $json = json_encode($dm);
-                $nr = json_decode($json, true);
-                if (empty($nr['d'][0])) {
-                    $count = 1;
-                    $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-                } else {
-                    $nr = $nr['d'];
-                    // 获取弹幕参数
-                    $cs = [];
-                    foreach ($dm->d as $d) {
-                        $pValue = (string)$d['p'];
-                        $psz = explode(",", $pValue);
-                        $cs[] = [$psz[0], $psz[1], $psz[3], $psz[4]];
-                    }
-                    // 重新组装
-                    $count = count($nr);
-                    if ($count > 3000) {
-                        $count = 3000;
-                    }
-                    $web = [];
-                    if ($count < 1) {
-                        $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-                        $count = 1;
-                    } else {
-                        $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
-                    }
-                    for ($i = 0; $i < $count; $i++) {
-                        $nr[$i] = str_replace('<', '&lt;', $nr[$i]);
-                        $nr[$i] = str_replace('>', '&gt;', $nr[$i]);
-                        $web[] = [
-                            $cs[$i][0],
-                            $cs[$i][1],
-                            $Api->num_hexColor($cs[$i][2]),
-                            $nr[$i],
-                            $cs[$i][3]
-                        ];
-                    }
-                }
-                break;
+                    break;
+            }
+        }
+
+        // 将结果存入Redis缓存
+        if ($redisCache->isAvailable()) {
+            $expireTime = 3600; // 存1小时
+            $redisCache->set($cacheKey, $db, $expireTime);
         }
     }
+
 
     // 最后根据播放器返回结果【#】
     $data = [];
     switch ($mode) {
         case "artplayer":
-            if ($is_url == false) {
-                if ($count > 0) {
-                    for ($z = 0; $z < count($db); $z++) {
+            if ($count > 0) {
+                if ($type == "json") {
+                    foreach ($db as $item) {
+                        $modeValue = $item[1];
+                        $modeValue = str_replace("1", "0", $modeValue);
+                        $modeValue = str_replace("5", "1", $modeValue);
+                        $modeValue = str_replace("4", "2", $modeValue);
                         $data[] = [
-                            "time" => (float)$db[$z][0],
-                            "mode" => (int)$db[$z][1],
-                            "color" => $db[$z][2],
-                            "text" => $db[$z][3],
-                            "timestamp" => $db[$z][4]
+                            "time" => (float)$item[0],
+                            "mode" => (int)$modeValue,
+                            "color" => $item[2],
+                            "text" => $item[3],
+                            "timestamp" => $item[4]
                         ];
                     }
-                }
-            } else {
-                if ($count > 0) {
-                    for ($z = 0; $z < count($web); $z++) {
+                } else {
+                    foreach ($db as $item) {
                         $data[] = [
-                            "time" => (float)$web[$z][0],
-                            "mode" => (int)$web[$z][1],
-                            "color" => $web[$z][2],
-                            "text" => $web[$z][3],
-                            "timestamp" => $web[$z][4]
+                            (float)$item[0],
+                            (int)$item[1],
+                            $item[2],
+                            $item[3],
+                            $item[4]
                         ];
                     }
                 }
             }
             break;
         default:
-            if ($is_url == false) {
-                if ($count > 0) {
-                    for ($z = 0; $z < count($db); $z++) {
-                        $data[] = [
-                            (float)$db[$z][0],
-                            (int)$db[$z][1],
-                            $db[$z][2],
-                            $db[$z][3],
-                            $db[$z][4]
-                        ];
-                    }
-                }
-            } else {
-                if ($count > 0) {
-                    for ($z = 0; $z < count($web); $z++) {
-                        $data[] = [
-                            (float)$web[$z][0],
-                            (int)$web[$z][1],
-                            $web[$z][2],
-                            $web[$z][3],
-                            $web[$z][4]
-                        ];
-                    }
+            if ($count > 0) {
+                foreach ($db as $item) {
+                    $data[] = [
+                        (float)$item[0], // 弹幕时间
+                        (int)$item[1], // 弹幕位置
+                        $item[2], // 弹幕颜色
+                        $item[3], // 弹幕内容
+                        $item[4] // 弹幕时间戳
+                    ];
                 }
             }
             break;
@@ -319,60 +290,84 @@ function getDanmu($id_url, $mode)
     return $data;
 }
 
-function whoUrl($url)
-// 检测哪个平台的链接
+
+
+function getBlibili($userUrl, $Api, $max_conunt)
 {
-    $q = 1008611;
-    if (strpos($url, "v.qq.com") !== false) {
-        $q = 'qq';
+    // https://www.bilibili.com/video/BV1mf421B7rZ/
+    // https://www.bilibili.com/bangumi/play/ep780019
+    if (strpos($userUrl, "bangumi") !== false) {
+        $bv = $Api->GetTextRight($userUrl, "/ep");
+        if (strpos($bv, "?") !== false) {
+            $bv = $Api->GetTextLeft($bv, "?");
+        }
+        $cid = json_decode($Api->CurlGet("https://api.bilibili.com/pgc/view/web/season?ep_id=$bv", false), true);
+        $cid = $cid['result']['episodes'][0]['cid'];
+    } else {
+        $bv = $Api->GetTextRight($userUrl, "video/");
+        if (strpos($bv, "/") !== false) {
+            $bv = $Api->GetTextLeft($bv, "/");
+        }
+        $cid = json_decode($Api->CurlGet("https://api.bilibili.com/x/player/pagelist?bvid=$bv", false), true);
+        $cid = $cid['data'][0]['cid'];
     }
-    if (strpos($url, "bilibili.com") !== false) {
-        $q = 'b站';
+    if (empty($cid)) {
+        $count = 1;
+        $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+    } else {
+        $dm = $Api->GetBilibiliXml("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid", false);
+        $dm = $Api->XmlToHtml($dm);
+        $dm = simplexml_load_string($dm);
+        // 获取弹幕内容
+        $json = json_encode($dm);
+        $nr = json_decode($json, true);
+        $nr = $nr['d'];
+        $count = count($nr);
+
+        // 获取弹幕参数
+        $cs = [];
+        foreach ($dm->d as $d) {
+            $pValue = (string)$d['p'];
+            $psz = explode(",", $pValue);
+            $cs[] = [$psz[0], $psz[1], $psz[3], $psz[4]];
+        }
+
+        // 判断弹幕条数是否超过最大条数，如果超过则进行裁切
+        if ($count > $max_conunt) {
+            $nr = $Api->Array_GetNum($nr, $max_conunt);
+            $cs = $Api->Array_GetNum($cs, $max_conunt);
+            $count = count($nr);
+        }
+
+        // 重新组装
+        $web = [];
+        if ($count < 1) {
+            $web[] = ["1", 5, "#4994c4", '请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+            $count = 1;
+        } else {
+            $web[] = ['1', 5, "#4994c4", '有' . $count . '条弹幕正在赶来，请遵守弹幕礼仪，祝您观影愉快~', (string)time()];
+        }
+        $i = 0;
+        foreach ($cs as $key => $item) {
+            if ($i < $count) {
+                $web[] = [
+                    $item[0],
+                    $item[1],
+                    $Api->num_hexColor($item[2]),
+                    $Api->XmlToHtml($nr[$key]),
+                    $item[3]
+                ];
+            } else {
+                break;
+            }
+            $i++;
+        }
     }
-    return $q;
+    return $web;
 }
 
 ?>
 
-<!--
-                ii.                                         ;9ABH,          
-               SA391,                                    .r9GG35&G          
-               &#ii13Gh;                               i3X31i;:,rB1         
-               iMs,:,i5895,                         .5G91:,:;:s1:8A         
-                33::::,,;5G5,                     ,58Si,,:::,sHX;iH1        
-                Sr.,:;rs13BBX35hh11511h5Shhh5S3GAXS:.,,::,,1AG3i,GG        
-                .G51S511sr;;iiiishS8G89Shsrrsh59S;.,,,,,..5A85Si,h8        
-               :SB9s:,............................,,,.,,,SASh53h,1G.       
-            .r18S;..,,,,,,,,,,,,,,,,,,,,,,,,,,,,,....,,.1H315199,rX,       
-          ;S89s,..,,,,,,,,,,,,,,,,,,,,,,,....,,.......,,,;r1ShS8,;Xi       
-        i55s:.........,,,,,,,,,,,,,,,,.,,,......,.....,,....r9&5.:X1       
-       59;.....,.     .,,,,,,,,,,,...        .............,..:1;.:&s       
-      s8,..;53S5S3s.   .,,,,,,,.,..      i15S5h1:.........,,,..,,:99       
-      93.:39s:rSGB@A;  ..,,,,.....    .SG3hhh9G&BGi..,,,,,,,,,,,,.,83      
-      G5.G8  9#@@@@@X. .,,,,,,.....  iA9,.S&B###@@Mr...,,,,,,,,..,.;Xh     
-      Gs.X8 S@@@@@@@B:..,,,,,,,,,,. rA1 ,A@@@@@@@@@H:........,,,,,,.iX:    
-     ;9. ,8A#@@@@@@#5,.,,,,,,,,,... 9A. 8@@@@@@@@@@M;    ....,,,,,,,,S8    
-     X3    iS8XAHH8s.,,,,,,,,,,...,..58hH@@@@@@@@@Hs       ...,,,,,,,:Gs   
-    r8,        ,,,...,,,,,,,,,,,,,...  ,h8XABMMHX3r.          .,,,,,,,.rX:  
-   :9, .    .:,..,:;;;::,.,,,,,..          .,,.               ..,,,,,,.59  
-  .Si      ,:.i8HBMMMMMB&5,....                    .            .,,,,,,.sMr
-  SS       :: h@@@@@@@@@@#; .                     ...  .         ..,,,,iM5
-  91  .    ;:.,1&@@@@@@MXs.                            .          .,,:,:&S
-  hS ....  .:;,,,i3MMS1;..,..... .  .     ...                     ..,:,.99
-  ,8; ..... .,:,..,8Ms:;,,,...                                     .,::.83
-   s&: ....  .sS553B@@HX3s;,.    .,;13h.                            .:::&1
-    SXr  .  ...;s3G99XA&X88Shss11155hi.                             ,;:h&,
-     iH8:  . ..   ,;iiii;,::,,,,,.                                 .;irHA  
-      ,8X5;   .     .......                                       ,;iihS8Gi
-        1831,                                                 .,;irrrrrs&@
-           ;5A8r.                                            .:;iiiiirrss1H
-             :X@H3s.......                                .,:;iii;iiiiirsrh
-              r#h:;,...,,.. .,,:;;;;;:::,...              .:;;;;;;iiiirrss1
-             ,M8 ..,....,.....,,::::::,,...         .     .,;;;iiiiiirss11h
-             8B;.,,,,,,,.,.....          .           ..   .:;;;;iirrsss111h
-            i@5,:::,,,,,,,,.... .                   . .:::;;;;;irrrss111111
-            9Bi,:,,,,......                        ..r91;;;;;iirrsss1ss1111
--->
 
 <!DOCTYPE html>
 <html lang="zh">
@@ -442,7 +437,7 @@ function whoUrl($url)
                                 <td>id</td>
                                 <td>Text</td>
                                 <td>视频标识</td>
-                                <td>视频链接MD5或平台链接<br><br>已支持平台：<br>b站、腾讯视频</td>
+                                <td>视频链接MD5或平台链接<br><br>已支持平台：<br>b站、腾讯视频、爱奇艺、芒果TV、优酷</td>
                             </tr>
                             <tr>
                                 <td>mode</td>
@@ -514,6 +509,16 @@ function whoUrl($url)
     <script>
         console.log("\n\n\n %c 弹幕管理系统 By：小言u %c https://github.com/xiaoyanu/danmuku", "color:#fff;background:linear-gradient(90deg,#448bff,#44e9ff);padding:5px 0;", "color:#000;background:linear-gradient(90deg,#44e9ff,#ffffff);padding:5px 10px 5px 0px;");
     </script>
+    <script>
+        var _hmt = _hmt || [];
+        (function() {
+            var hm = document.createElement("script");
+            hm.src = "https://hm.baidu.com/hm.js?679eeaa45e6261f40f83c25cb3743b48";
+            var s = document.getElementsByTagName("script")[0];
+            s.parentNode.insertBefore(hm, s);
+        })();
+    </script>
+
 </body>
 
 </html>
